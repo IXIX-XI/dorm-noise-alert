@@ -5,7 +5,7 @@
 [![Framework](https://img.shields.io/badge/framework-SPL_Standard_Peripheral_Library-orange.svg)](https://www.st.com/en/embedded-software/stm32-embedded-software.html)
 [![IDE](https://img.shields.io/badge/IDE-Keil5-009900.svg)](https://www.keil.com/)
 
-> 🏆 萌芽杯参赛作品
+
 
 基于 **STM32F103C8T6** 的宿舍智能噪音监测与提醒系统。双麦克风全向拾音，三色 LED 实时指示声级，超过阈值时通过 **4G 模组（合宙 Air780E 内核）** 向**企业微信群机器人**推送告警。
 
