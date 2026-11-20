@@ -1,0 +1,30 @@
+# ===== Keil MDK build output =====
+Objects/
+Listings/
+*.bak
+*.dep
+*.uvgui*
+*.sct
+*.axf
+*.htm
+*.lnp
+*.map
+*.plg
+*.lst
+*.d
+*.crf
+*.o
+*.bin
+*.hex
+
+# ===== Debugger logs =====
+JLinkLog.txt
+JLinkSettings.ini
+ST-LINK*
+
+# ===== Editor / OS =====
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
