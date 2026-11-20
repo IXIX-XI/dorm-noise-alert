@@ -1,8 +1,35 @@
 # 静享寝居 · Dorm Noise Alert
 
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform](https://img.shields.io/badge/platform-STM32F103-blue.svg)](https://www.st.com/en/microcontrollers-microprocessors/stm32f103c8t6.html)
+[![Framework](https://img.shields.io/badge/framework-SPL_Standard_Peripheral_Library-orange.svg)](https://www.st.com/en/embedded-software/stm32-embedded-software.html)
+[![IDE](https://img.shields.io/badge/IDE-Keil5-009900.svg)](https://www.keil.com/)
+
+> 🏆 萌芽杯参赛作品
+
 基于 **STM32F103C8T6** 的宿舍智能噪音监测与提醒系统。双麦克风全向拾音，三色 LED 实时指示声级，超过阈值时通过 **4G 模组（合宙 Air780E 内核）** 向**企业微信群机器人**推送告警。
 
-STM32F103-based dormitory noise monitoring & alert system. Dual MAX4466 mics, 3-color LED level indicator, 4G (Air780E) push to a WeCom group bot.
+STM32F103-based dormitory noise monitoring & alert system. Dual MAX4466 mics for omnidirectional pickup, 3-color LED level indicator, and 4G (Air780E) push to a WeCom group bot when noise exceeds threshold.
+
+---
+
+## 🎯 系统架构 / Architecture
+
+```
+  MAX4466 ×2                    STM32F103C8T6                  银尔达 M100 (Air780E)        企业微信群机器人
+  ┌────────┐                    ┌──────────────┐               ┌──────────────────┐        ┌──────────────┐
+  │麦1 → PA0│──┐                 │              │   PA9(TX) →   │  RXD (Pin4)      │        │              │
+  │麦2 → PA1│──┤→ ADC1 CH0/1 ──→ │ RMS + dB 换算 │               │                  │  HTTP  │              │
+  └────────┘  │                 │  阈值判断     │               │ HTTPDATA → body  │ ────→  │ errcode=0?   │
+              │                 │  LED 驱动     │   PA10(RX) ←   │ HTTPACTION → 200 │        │ ✓ 投递消息   │
+  绿 PA4 ─────┼────────────────→ │  PA4 / PB0 / PB1              │  +HTTPACTION     │        │              │
+  黄 PB0 ─────┤                 │              │               │                  │        └──────────────┘
+  红 PB1 ─────┘                 └──────┬───────┘               └──────────────────┘
+                                        │ 电池 3.7V → TP4056 → M100 VIN
+                                        │          → LDO 3.3V → STM32 VDD
+```
+
+---
 
 ## ✨ 功能特性 / Features
 
@@ -11,6 +38,20 @@ STM32F103-based dormitory noise monitoring & alert system. Dual MAX4466 mics, 3-
 - **三色灯分级指示**：绿灯常亮（安静）/ 黄灯闪烁（中等）/ 红灯常亮（吵闹）
 - **4G 远程告警**：超阈值自动向企业微信群推送（含音量值，不含人名/位置）
 - **无串口自诊断**：开机自检 + LED 闪码，无需串口也能定位故障
+
+### 算法核心（无 FPU 定点实现）
+
+```c
+// 一阶高通去直流
+dc += ac / 64;
+// 功率域一阶平滑 (τ ≈ 80ms)
+pwr = (pwr * 7 + (ac - dc) * (ac - dc)) / 8;
+// 定点 RMS + log2 → dB
+rms   = isqrt32(pwr);
+log2  = Log2Q8(rms);          // 8.8 定点 log2, 误差 ≈ 0.26 dB
+db10  = (log2 - 2816) * 2352 / 10000;
+spl   = db10 + SPL_OFFSET_DB;
+```
 
 ## 🧰 硬件清单 / BOM
 
@@ -22,7 +63,9 @@ STM32F103-based dormitory noise monitoring & alert system. Dual MAX4466 mics, 3-
 | 4G 模组 | 银尔达 YED-M100M-C2 | 合宙 Air780E 内核，3.3~4.2V 宽压 |
 | 电源 | 3.7V 锂电池 + TP4056 | M100 直吃电池电压，STM32 经 LDO 转 3.3V |
 
-**接线**：STM32 PA9(TX) → M100 RXD；STM32 PA10(RX) → M100 TXD；必须共地；VIN 旁就近并 470µF 电解电容。
+**接线**：STM32 PA9(TX) → M100 RXD(Pin4)；STM32 PA10(RX) → M100 TXD(Pin3)；必须共地；VIN 旁就近并 470µF 电解电容。
+
+**⚠️ 电源提醒**：USB 与外部 3.3V 绝对不能同时接（板上 AMS1117 会与外部电源并联抢电流）。建议用 **MCP1700-3.3 / RT9193-3.3 / ME6211C33** 等低 Iq LDO，不要用 AMS1117。
 
 ## 🚀 快速开始 / Quick Start
 
@@ -65,6 +108,47 @@ STM32F103-based dormitory noise monitoring & alert system. Dual MAX4466 mics, 3-
 
 校准 `SPL_OFFSET_DB`：手机分贝仪与装置同位置比对，差值 ×10 加到该宏上。
 
+## 🛠️ 4G 模组 AT 指令（合宙 Air780E）
+
+```
+AT+HTTPINIT
+AT+HTTPSSL=1
+AT+HTTPPARA="URL","https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=YOUR_KEY"
+AT+HTTPPARA="CONTENT","application/json"
+AT+HTTPDATA=<body_len>,10000        ← 注意：Air780E 回 DOWNLOAD (不是 SIM800 的 > )
+< 发送 JSON body >
+AT+HTTPACTION=1
+← 等待 +HTTPACTION: 1,200,<len>
+AT+HTTPREAD
+AT+HTTPTERM
+```
+
+## 📁 目录结构
+
+```
+.
+├── User/                  # 主应用 (main.c)
+├── Hardware/              # 板级外设驱动 (LED / Mic / M100)
+├── Library/               # STM32 SPL 标准库
+├── start/                 # 启动文件 (startup_stm32f10x_md.s)
+├── Project.uvprojx        # Keil 工程文件
+└── README.md
+```
+
 ## 📄 许可证 / License
 
-MIT License
+MIT License © IXIX-XI
+
+---
+
+<details>
+<summary>📊 开发说明 / Development Notes</summary>
+
+- **为何不用 FPU？** STM32F103C8T6 没有硬件 FPU，用定点运算比软浮点快 5~10 倍
+- **为何取两路 max？** 单麦有指向性盲区，两麦背向布置后取 max ≈ 全向拾音
+- **为何开机强制推？** 没有串口调试通道，强制推送 + LED 闪码是唯一的无串口自诊断手段
+- **为何用 HTTPDATA 而非 HTTPPARA="DATA"?** 前者支持大于 2KB 的 body，后者有长度限制
+- **Air780E vs SIM800L：** HTTPDATA 提示符是 `DOWNLOAD` 不是 `>`，这是最容易踩的坑
+- **Webhook Key 必须私有**：企业微信群机器人 key 任何人拿到都能刷消息，公开仓库务必占位
+
+</details>
